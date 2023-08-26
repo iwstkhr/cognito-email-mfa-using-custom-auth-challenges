@@ -1,0 +1,4 @@
+boto3==1.28.35
+cryptography==41.0.3
+python-jose==3.3.0
+warrant==0.6.1

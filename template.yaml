@@ -1,0 +1,105 @@
+AWSTemplateFormatVersion: 2010-09-09
+Transform: AWS::Serverless-2016-10-31
+Description: Email MFA using Cognito User Pool custom authentication challenges
+
+Globals:
+  Function:
+    Timeout: 3
+    MemorySize: 128
+
+Parameters:
+  CodeLength:
+    Type: Number
+    Default: '6'
+  EmailSender:
+    Type: String
+
+Resources:
+  CognitoUserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: cognito-custom-auth-email-mfa
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 8
+      UsernameAttributes:
+        - email
+      Schema:
+        - Name: email
+          AttributeDataType: String
+          Required: true
+
+  CognitoUserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      UserPoolId: !Ref CognitoUserPool
+      ClientName: client
+      GenerateSecret: false
+      ExplicitAuthFlows:
+        - ALLOW_CUSTOM_AUTH
+        - ALLOW_REFRESH_TOKEN_AUTH
+        - ALLOW_USER_SRP_AUTH
+
+  LambdaLayer:
+    Type: AWS::Serverless::LayerVersion
+    Properties:
+      LayerName: cognito_email_mfa_layer
+      ContentUri: src/layers
+      CompatibleRuntimes:
+        - python3.11
+      RetentionPolicy: Delete
+
+  CreateAuthChallenge:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/create_auth_challenge
+      Handler: app.lambda_handler
+      Runtime: python3.11
+      Layers:
+        - !Ref LambdaLayer
+      Environment:
+        Variables:
+          CODE_LENGTH: !Ref CodeLength
+          EMAIL_SENDER: !Ref EmailSender
+      Events:
+        CognitoEvent:
+          Type: Cognito
+          Properties:
+            Trigger: CreateAuthChallenge
+            UserPool: !Ref CognitoUserPool
+      Policies:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action: ses:SendEmail
+            Resource: "*"
+
+  DefineAuthChallenge:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/define_auth_challenge
+      Handler: app.lambda_handler
+      Runtime: python3.11
+      Layers:
+        - !Ref LambdaLayer
+      Events:
+        CognitoEvent:
+          Type: Cognito
+          Properties:
+            Trigger: DefineAuthChallenge
+            UserPool: !Ref CognitoUserPool
+
+  VerifyAuthChallenge:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/verify_auth_challenge
+      Handler: app.lambda_handler
+      Runtime: python3.11
+      Layers:
+        - !Ref LambdaLayer
+      Events:
+        CognitoEvent:
+          Type: Cognito
+          Properties:
+            Trigger: VerifyAuthChallengeResponse
+            UserPool: !Ref CognitoUserPool
